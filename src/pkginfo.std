@@ -1,0 +1,13 @@
+PKG=hardute
+NAME="hardware utilisation monitor"
+CATEGORY=utility
+DESC="Collects utilisation and performance statistics"
+VENDOR="Ericsson (c) 2011"
+BASEDIR=/
+MAXINST=1
+INTONLY=1
+CLASSES=utility none
+ISTATES="S 2 3"
+RSTATES="S 2 3"
+ULIMIT=20
+ORDER=none utility

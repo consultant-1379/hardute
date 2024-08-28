@@ -1,0 +1,12 @@
+i pkginfo=pkginfo
+d none /hardute 0755 root root
+d none /hardute/bin 0755 root root
+d none /hardute/data 0777 root root
+d none /var/opt/ericsson/eniqpc 0777 root root
+f none /hardute/bin/expire.sh 0755 root root
+f none /hardute/bin/hardute 0755 root root
+f none /hardute/bin/hardute.sh 0755 root root
+f none /hardute/bin/hardute-sar-00.sh 0755 root root
+f none /hardute/bin/hardute-sar-15.sh 0755 root root
+f none /hardute/bin/hardute-sar-30.sh 0755 root root
+f none /hardute/bin/hardute-sar-45.sh 0755 root root

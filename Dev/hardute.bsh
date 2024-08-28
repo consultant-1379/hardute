@@ -1,0 +1,211 @@
+#!/bin/bash
+# ********************************************************************
+# Ericsson Radio Systems AB                                     SCRIPT
+# ********************************************************************
+#
+#
+# (c) Ericsson Radio Systems AB 2018 - All rights reserved.
+#
+# The copyright to the computer program(s) herein is the property
+# of Ericsson Radio Systems AB, Sweden. The programs may be used
+# and/or copied only with the written permission from Ericsson Radio
+# Systems AB or in accordance with the terms and conditions stipulated
+# in the agreement/contract under which the program(s) have been
+# supplied.
+#
+# ********************************************************************
+# Product : Hardware Utilization Statistics Generator, CXP ????
+# Name    : hardute
+# Purpose : Performance data collection tool.
+# Usage   : ./hardute.bsh
+# Revision :
+# 19/04/2018 Satish Krishnan - First version
+# 07/05/2018 XSHRHIR - Changed file creation to one file per statistics instead of a file having all statistics data
+#					 - Modified script and stat file location
+#
+#
+# ********************************************************************
+
+version=""
+
+#---------------------------< Command Section >----------------------------
+
+HARDUTE_INI="/ericsson/hardute/config/hardute.ini"
+HARDUTE_LOG="/ericsson/hardute/log/"
+
+#---------------------------< Command line arguments >---------------------
+
+_arg_count=$#
+_arg1=$1
+EXPIRY_DAYS=$2
+
+if [ $_arg_count -eq 2 ] && [ $_arg1 == "expire" ] && [ $EXPIRY_DAYS -gt 0 ] && [ $EXPIRY_DAYS -le 31 ]
+then
+    DATADIR="/ericsson/hardute/log/"
+    find $DATADIR -type f -mtime +$EXPIRY_DAYS -exec rm \{\} \;
+
+elif [ $_arg_count -ne 0 ]
+then
+
+    echo "Usage : /ericsson/hardute/bin/hardute.bsh [ expire <EXPIRY_DAYS> ]"
+    echo "EXPIRY_DAYS = 1 - 31 both inclusive"
+    echo " Ex:"
+    echo " For Data collection : /ericsson/hardute/bin/hardute.bsh"
+    echo " For logs cleanup    : /ericsson/hardute/bin/hardute.bsh expire 28"
+
+else
+
+    #------------------
+    #   i n i g e t
+    #------------------
+    # Usage: iniget <block> [-<p|v> <line>] [-f <configfile>] [raw]
+    # -p gives whole matching <line>
+    # -v gives only value of matching <line>
+    # -f defaults to /ericsson/config/hardute.ini
+    # raw will print even commented (;) lines
+    #
+    iniget()
+    {
+       local INIBLOCK=$1 INIWLINE INILINE INICONFIGFILE INIPRINTTYPE
+
+       if [ -n "$INIBLOCK" ]; then
+          shift 1
+       else
+          echo "Usage: iniget <block> [-<p|v> <line>] [-f <configfile>] [raw]"
+          return 1
+       fi
+       unset INIWLINE INILINE INICONFIGFILE INIPRINTTYPE
+
+       while [ -n "$1" ]; do
+          case $1 in
+             -p) INIWLINE=parameter
+                INILINE=$2
+                shift 2
+                ;;
+             -v) INIWLINE=value
+                INILINE=$2
+                shift 2
+                ;;
+             -f) INICONFIGFILE=$2
+                shift 2
+                ;;
+             raw) INIPRINTTYPE=raw
+                shift 1
+                ;;
+             *)      return 1
+                ;;
+          esac
+       done
+
+       [ -z "$INICONFIGFILE" ] && INICONFIGFILE=$HARDUTE_INI
+
+       awk -F= -v printtype=$INIPRINTTYPE -v line="$INILINE" -v way=$INIWLINE '
+       { sub(/[       ]*$/,"");      #remove trailing whitespace and tabs
+          if ($1=="['$INIBLOCK']") {
+             while ((getline) > 0) {
+                if ($0 ~ /^ *\[/) exit
+                if (($0 ~ /^ *;/) && (printtype!="raw")) continue
+                if ($1==line) {
+                   if (way=="parameter") {print $0; exit}
+                   if (way=="value")     {sub(/^[^=]*=/,""); print $0; exit}
+                }
+                else if (! line) print $0
+            }
+          }
+       }' $INICONFIGFILE
+    }
+
+#--------------------------
+# This Block to identify OS   
+#--------------------------
+# 
+
+Supported_OS=`iniget General -f ${HARDUTE_INI} -v Supported_OS`
+OS_COUNT=1
+MATCH_OS=""
+while [[ $OS_COUNT -le $Supported_OS ]]
+do
+    ## Check for OS commands matching
+    _OS_FLAG=false
+    COMMAND_COUNT=`iniget OS$OS_COUNT -f ${HARDUTE_INI} -v COMMANDS`
+    _cmd_count=1
+    while [ ! -z "$COMMAND_COUNT" ] && [ $_cmd_count -le $COMMAND_COUNT ]
+    do
+        ## Get the Command from the block
+        _cmd_=`iniget OS$OS_COUNT -f ${HARDUTE_INI} -v COMMAND$_cmd_count`
+        ## Get the Output from the block
+        _output_=`iniget OS$OS_COUNT -f ${HARDUTE_INI} -v OUTPUT$_cmd_count`
+        ## Execute the Command
+        _os_output_=`$_cmd_ 2>/dev/null`
+        ## Compare the Output
+        if [ "${_output_}" == "${_os_output_}" ]; then 
+            _OS_FLAG=true		
+        else
+            _OS_FLAG=false
+        fi
+        _cmd_count=$(( _cmd_count + 1 ))
+    done
+
+    ## Check if this is the Correct OS
+    if [ ${_OS_FLAG} == "true" ]; then
+        MATCH_OS=`iniget OS$OS_COUNT -f ${HARDUTE_INI} -v MATCH`
+        break
+    fi
+    
+    OS_COUNT=$(( OS_COUNT + 1 ))
+done
+
+#-------------------------------------------
+# Block to execute commands on identified OS
+#-------------------------------------------
+# 
+
+# Get the SFTP Server and Path for dumping the Stats file collected.
+_sftp_server_=`iniget General -f ${HARDUTE_INI} -v SFTP_SERVER`
+_sftp_path_=`iniget General -f ${HARDUTE_INI} -v SFTP_PATH`
+
+
+
+if [ ${_OS_FLAG} == "true" ]; then
+	
+    COMMAND_COUNT=`iniget $MATCH_OS -f ${HARDUTE_INI} -v COMMANDS`
+    _cmd_count=1
+	LABEL_COUNT=`iniget $MATCH_OS -f ${HARDUTE_INI} -v LABELS`
+	_label_count=1
+    while [ $_cmd_count -le $COMMAND_COUNT ]
+    do
+        ## Get the Command from the block
+        _cmd_=`iniget $MATCH_OS -f ${HARDUTE_INI} -v COMMAND$_cmd_count`
+	_label_=`iniget $MATCH_OS -f ${HARDUTE_INI} -v LABEL$_label_count`
+		
+		LOG_FILE=$HARDUTE_LOG`date +%Y%m%d%H%M`"_15_"$_label_"_"`hostname`".stat"
+
+        ## Execute the Command
+        #Header=`hostname`"|"$MATCH_OS"|COMMAND"$_cmd_count"|"$_cmd_
+	#echo "------------------------------------------------------------" >>$LOG_FILE
+        #echo $Header >> $LOG_FILE
+	#echo "------------------------------------------------------------" >>$LOG_FILE
+	
+	echo $_cmd_ 
+	eval $_cmd_ 2>/dev/null >> $LOG_FILE
+	
+	
+	#_new_cmd_="eval mpstat -P ALL '|' awk ''\''{print' '$2,$3,$5,$10}'\'''"
+	#echo $_new_cmd_ " direct command"
+	#`$_new_cmd_ >> /tmp/cpu1.stat`
+	#`mpstat -P ALL | awk '{print $2,$3,$5,$10}'`
+			
+
+	 _cmd_count=$(( _cmd_count + 1 ))
+	_label_count=$(( _label_count + 1 ))
+   
+    done
+		
+	
+	## Transfer the Stats file to a Central location
+        sftp $_sftp_server_:$_sftp_path_ <<< "put $LOG_FILE"
+
+else 
+    echo "Unsupported OS Type !!!!"
+fi
+fi
